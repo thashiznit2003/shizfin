@@ -43,6 +43,11 @@ final class FilterViewModel: ViewModel {
     @Published
     var currentFilters: ItemFilterCollection
 
+    /// Alphabet selection navigates within the complete library; it is not a
+    /// server-side filter that replaces the list with a single letter.
+    @Published
+    var selectedLetter: ItemLetter?
+
     /// Fixed filters, excluded from selection state and reset actions
     let staticFilters: ItemFilterCollection
 
@@ -63,7 +68,12 @@ final class FilterViewModel: ViewModel {
         currentFilters: ItemFilterCollection = .default,
         staticFilters: ItemFilterCollection = .default
     ) {
+        var currentFilters = currentFilters
         self.parent = parent
+        self.selectedLetter = currentFilters.letter.first
+        // A pre-existing selection from an earlier app version should become a
+        // navigation target, not continue filtering the server response.
+        currentFilters.letter = []
         self.currentFilters = currentFilters
         self.staticFilters = staticFilters
 
@@ -96,6 +106,7 @@ final class FilterViewModel: ViewModel {
 
         case .letter:
             currentFilters.letter = ItemFilterCollection.default.letter
+            selectedLetter = nil
 
         case .officialRatings:
             currentFilters.officialRatings = ItemFilterCollection.default.officialRatings

@@ -28,11 +28,14 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
 
         case refresh
         case getNextPage
+        case getPreviousPage
         case getRandomItem
         case getNextSearchPage
         case search(query: String)
 
         case _actuallyGetNextPage
+        case _actuallyGetPreviousPage
+        case jump(toOffset: Int)
 
         var transition: Transition {
             switch self {
@@ -41,6 +44,9 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
                     .whenBackground(.refreshing)
 
             case .getNextPage:
+                .none
+
+            case .getPreviousPage:
                 .none
 
             case .getRandomItem:
@@ -55,6 +61,13 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
 
             case ._actuallyGetNextPage:
                 .background(.gettingNextPage)
+
+            case ._actuallyGetPreviousPage:
+                .background(.gettingPreviousPage)
+
+            case .jump:
+                .to(.refreshing, then: .content)
+                    .whenBackground(.refreshing)
             }
         }
     }
@@ -63,6 +76,7 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
 
         case refreshing
         case gettingNextPage
+        case gettingPreviousPage
         case gettingRandomItem
         case gettingNextSearchPage
         case searching
@@ -95,8 +109,10 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
             elements.removeAll()
             searchElements.removeAll()
             nextOffset = 0
+            firstOffset = 0
             nextSearchOffset = 0
             hasNextPage = library.hasNextPage
+            hasPreviousPage = false
             hasNextSearchPage = false
         }
     }
@@ -121,6 +137,7 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
     let pageSize: Int
 
     private var nextOffset = 0
+    private var firstOffset = 0
     private var nextSearchOffset = 0
 
     // Generations prevent responses for replaced collections from updating the store
@@ -129,6 +146,7 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
     private var isInvalidated = false
 
     private var hasNextPage: Bool
+    private var hasPreviousPage = false
     private var hasNextSearchPage: Bool
     private var storeRefreshTask: AnyCancellable?
     private var hasPendingStoreRefresh = false
@@ -264,8 +282,10 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
         elements.removeAll()
         searchElements.removeAll()
         nextOffset = 0
+        firstOffset = 0
         nextSearchOffset = 0
         hasNextPage = false
+        hasPreviousPage = false
         hasNextSearchPage = false
         cancel()
     }
@@ -318,13 +338,30 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
 
         generation += 1
         hasNextPage = true
+        hasPreviousPage = false
         nextOffset = 0
+        firstOffset = 0
 
         if !StateTask.isBackground {
             elements.removeAll()
         }
 
         try await loadPage(replacing: true)
+    }
+
+    @Function(\Action.Cases.jump)
+    private func _jump(toOffset offset: Int) async throws {
+        guard !isInvalidated else { return }
+
+        generation += 1
+        let targetOffset = max(0, offset)
+        hasNextPage = true
+        hasPreviousPage = targetOffset > 0
+        nextOffset = targetOffset
+        firstOffset = targetOffset
+        elements.removeAll()
+
+        try await loadPage(replacing: true, initialOffset: targetOffset)
     }
 
     @Function(\Action.Cases.getNextPage)
@@ -341,12 +378,45 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
         try await loadPage(replacing: false)
     }
 
-    private func loadPage(replacing: Bool) async throws {
+    @Function(\Action.Cases.getPreviousPage)
+    private func _getPreviousPage() async throws {
+        guard hasPreviousPage, !isInvalidated, !background.is(.refreshing) else { return }
+
+        await _actuallyGetPreviousPage()
+    }
+
+    @Function(\Action.Cases._actuallyGetPreviousPage)
+    private func __actuallyGetPreviousPage() async throws {
+        guard hasPreviousPage, !isInvalidated, !background.is(.refreshing) else { return }
+
+        let requestGeneration = generation
+        let offset = max(0, firstOffset - pageSize)
+        let page = try pageState(offset: offset, pageSize: pageSize)
+        let response = try await library.retrievePage(environment: environment, pageState: page)
+
+        guard !Task.isCancelled,
+              requestGeneration == generation,
+              firstOffset == offset + pageSize,
+              !isInvalidated
+        else { return }
+
+        try page.userSession.items.validate()
+        let items = try IdentifiedArray(
+            materialize(response, pageState: page),
+            uniquingIDsWith: { existing, _ in existing }
+        )
+
+        elements.insert(contentsOf: items.filter { elements[id: $0.id] == nil }, at: 0)
+        firstOffset = offset
+        hasPreviousPage = offset > 0 && response.isNotEmpty
+    }
+
+    private func loadPage(replacing: Bool, initialOffset: Int = 0) async throws {
         let requestGeneration = generation
         var replacing = replacing
 
         while !Task.isCancelled, !isInvalidated {
-            let offset = replacing ? 0 : nextOffset
+            let offset = replacing ? initialOffset : nextOffset
             let page = try pageState(offset: offset, pageSize: pageSize)
             let response = try await library.retrievePage(environment: environment, pageState: page)
 
@@ -368,6 +438,7 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
 
             if replacing {
                 elements = items
+                firstOffset = offset
                 replacing = false
             } else {
                 elements.append(contentsOf: items.filter { elements[id: $0.id] == nil })

@@ -150,6 +150,10 @@ struct PagingLibraryView<Library: PagingLibrary>: View where Library.Element: Li
                     viewModel.getNextPage()
                 }
             }
+            .onReachedTopEdge(offset: .offset(300)) {
+                guard !viewModel.isSearchActive else { return }
+                viewModel.getPreviousPage()
+            }
             .proxy(gridProxy)
             .onRefresh {
                 await viewModel.background.refresh()

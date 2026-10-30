@@ -39,7 +39,7 @@ struct LetterPickerBar: PlatformView {
     }
 
     private var selectedLetter: ItemLetter? {
-        viewModel.currentFilters.letter.first
+        viewModel.selectedLetter
     }
 
     private var rows: [Row] {
@@ -85,10 +85,10 @@ struct LetterPickerBar: PlatformView {
     }
 
     private func toggleLetter(_ letter: ItemLetter) {
-        if viewModel.currentFilters.letter.contains(letter) {
-            viewModel.currentFilters.letter = []
+        if viewModel.selectedLetter == letter {
+            viewModel.selectedLetter = nil
         } else {
-            viewModel.currentFilters.letter = [letter]
+            viewModel.selectedLetter = letter
         }
     }
 
@@ -144,7 +144,7 @@ struct LetterPickerBar: PlatformView {
 
                         case .ended, .cancelled, .failed:
                             if let target = letter(atY: location.y) {
-                                viewModel.currentFilters.letter = [target]
+                                viewModel.selectedLetter = target
                             }
                             activeLetter = nil
 
@@ -157,7 +157,7 @@ struct LetterPickerBar: PlatformView {
                         case let .letter(letter)?:
                             toggleLetter(letter)
                         case .dot?:
-                            viewModel.currentFilters.letter = []
+                            viewModel.selectedLetter = nil
                         case nil:
                             break
                         }

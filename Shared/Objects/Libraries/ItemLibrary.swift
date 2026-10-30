@@ -139,6 +139,29 @@ struct ItemLibrary: MediaLibrary, SearchablePagingLibrary, WithRandomElementLibr
         return try pageState.items(from: response).first
     }
 
+    /// Counts only the records before an alphabet index. The actual artwork is
+    /// still loaded lazily by the collection for the rows on screen.
+    func offset(
+        for letter: ItemLetter,
+        environment: Environment,
+        userSession: UserSession
+    ) async throws -> Int {
+        guard letter.value != "#" else { return 0 }
+
+        var filters = environment.filters
+        filters.letter = []
+        var parameters = attachFilters(
+            to: makeBaseItemParameters(environment: environment),
+            using: filters
+        )
+        parameters.limit = 0
+        parameters.nameLessThan = letter.value
+        parameters.userID = userSession.user.id
+
+        let response = try await userSession.client.send(Paths.getItems(parameters: parameters))
+        return response.value.totalRecordCount ?? 0
+    }
+
     func retrieveSearchPage(
         query: String,
         environment: Environment,
@@ -320,6 +343,22 @@ private struct ItemLibraryBody<Content: View>: View {
                 guard viewModel.environment.filters != filters else { return }
 
                 viewModel.environment.filters = filters
+            }
+            .onReceive(filterViewModel.$selectedLetter.compactMap { $0 }) { letter in
+                Task {
+                    guard let userSession = viewModel.userSession else { return }
+
+                    do {
+                        let offset = try await viewModel.library.offset(
+                            for: letter,
+                            environment: viewModel.environment,
+                            userSession: userSession
+                        )
+                        await viewModel.jump(toOffset: offset)
+                    } catch {
+                        viewModel.error = error
+                    }
+                }
             }
             #if os(tvOS)
             .filterBar(
