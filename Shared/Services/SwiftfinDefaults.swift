@@ -187,7 +187,10 @@ extension Defaults.Keys {
             }
 
             static var letterPickerOrientation: Key<LetterPickerOrientation> {
-                UserKey("letterPickerOrientation", default: .disabled)
+                // Shizfin's primary tvOS navigation affordance. The picker queries a
+                // single letter at a time, so enabling it does not load a library's
+                // complete artwork collection into memory.
+                UserKey("letterPickerOrientation", default: .trailing)
             }
 
             static var style: Key<LibraryStyle> {
