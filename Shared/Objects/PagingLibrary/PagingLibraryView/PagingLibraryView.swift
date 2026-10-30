@@ -12,6 +12,10 @@ import JellyfinAPI
 import SwiftUI
 @_spi(Advanced) import SwiftUIIntrospect
 
+#if os(tvOS)
+import UIKit
+#endif
+
 struct PagingLibraryView<Library: PagingLibrary>: View where Library.Element: LibraryElement {
 
     private enum Focus: String {
@@ -44,6 +48,11 @@ struct PagingLibraryView<Library: PagingLibrary>: View where Library.Element: Li
     private var gridProxy = CollectionVGridProxy()
     @StateObject
     private var viewModel: PagingLibraryViewModel<Library>
+
+    #if os(tvOS)
+    @State
+    private var collectionView: UICollectionView?
+    #endif
 
     @StoredValue
     private var parentLibraryStyle: LibraryStyle
@@ -162,6 +171,25 @@ struct PagingLibraryView<Library: PagingLibrary>: View where Library.Element: Li
             .introspect(.scrollView, on: .tvOS(.v26...)) { collectionView in
                 // TODO: CollectionVGrid option instead
                 collectionView.contentInsetAdjustmentBehavior = .never
+                self.collectionView = collectionView as? UICollectionView
+            }
+            .onChange(of: viewModel.scrollTargetIndex) { _, targetIndex in
+                guard let targetIndex else { return }
+
+                Task { @MainActor in
+                    // Wait for CollectionVGrid to apply its diffable snapshot.
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard let collectionView,
+                          targetIndex < collectionView.numberOfItems(inSection: 0)
+                    else { return }
+
+                    collectionView.scrollToItem(
+                        at: IndexPath(item: targetIndex, section: 0),
+                        at: .top,
+                        animated: false
+                    )
+                    viewModel.consumeScrollTarget()
+                }
             }
             #endif
             .ignoresSafeArea()

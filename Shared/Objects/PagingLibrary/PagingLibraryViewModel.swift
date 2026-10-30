@@ -120,6 +120,12 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
     @Published
     private(set) var searchElements: IdentifiedArrayOf<Element>
 
+    /// An absolute seek starts with a small window before the destination. The
+    /// view consumes this index to keep the chosen letter at the top while that
+    /// preceding window remains available for an immediate upward scroll.
+    @Published
+    private(set) var scrollTargetIndex: Int?
+
     @Published
     var searchQuery: String = "" {
         didSet {
@@ -129,6 +135,7 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
             searchGeneration += 1
             hasNextSearchPage = false
             searchElements.removeAll()
+            scrollTargetIndex = nil
             nextSearchOffset = 0
         }
     }
@@ -183,6 +190,7 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
         self.elements = IdentifiedArray([], uniquingIDsWith: { existing, _ in existing })
         self.environment = library.environment ?? .default
         self.searchElements = IdentifiedArray([], uniquingIDsWith: { existing, _ in existing })
+        self.scrollTargetIndex = nil
         self.hasNextPage = library.hasNextPage
         self.hasNextSearchPage = false
         self.library = library
@@ -281,6 +289,7 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
         hasPendingStoreRefresh = false
         elements.removeAll()
         searchElements.removeAll()
+        scrollTargetIndex = nil
         nextOffset = 0
         firstOffset = 0
         nextSearchOffset = 0
@@ -355,13 +364,28 @@ class PagingLibraryViewModel<Library: PagingLibrary>: ViewModel, Identifiable {
 
         generation += 1
         let targetOffset = max(0, offset)
+        let initialOffset = max(0, targetOffset - pageSize)
         hasNextPage = true
-        hasPreviousPage = targetOffset > 0
-        nextOffset = targetOffset
-        firstOffset = targetOffset
+        hasPreviousPage = initialOffset > 0
+        nextOffset = initialOffset
+        firstOffset = initialOffset
         elements.removeAll()
+        scrollTargetIndex = nil
 
-        try await loadPage(replacing: true, initialOffset: targetOffset)
+        try await loadPage(replacing: true, initialOffset: initialOffset)
+
+        // Keep one page above the destination in memory. This avoids the grid
+        // mistaking the initial render for an upward scroll, while still making
+        // the preceding rows immediately available.
+        if initialOffset < targetOffset, hasNextPage {
+            try await loadPage(replacing: false)
+        }
+
+        scrollTargetIndex = targetOffset - initialOffset
+    }
+
+    func consumeScrollTarget() {
+        scrollTargetIndex = nil
     }
 
     @Function(\Action.Cases.getNextPage)
